@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>Slideshow</title>
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #000;
+    overflow: hidden;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  #stage {
+    position: fixed;
+    inset: 0;
+    height: 100dvh;
+    background: #000;
+  }
+
+  /* every page is stacked; only the current one is visible */
+  #stage img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;      /* zoom to fill the whole screen */
+    visibility: hidden;
+  }
+  #stage img.on { visibility: visible; }
+
+  /* progress bar: thin to look at, taller invisible area to grab with a finger */
+  :root { --bar-h: 8px; }
+  #bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 28px;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    box-sizing: content-box;
+    touch-action: none;
+    z-index: 5;
+  }
+  #bar::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: env(safe-area-inset-bottom, 0px);
+    height: var(--bar-h);
+    background: rgba(0, 0, 0, 0.12);
+  }
+  #fill {
+    position: absolute;
+    left: 0;
+    bottom: env(safe-area-inset-bottom, 0px);
+    height: var(--bar-h);
+    width: 0;
+    background: #000;
+  }
+  #cap {
+    position: absolute;
+    left: 0;
+    bottom: env(safe-area-inset-bottom, 0px);
+    height: var(--bar-h);
+    font: 700 16px/var(--bar-h) Georgia, "Times New Roman", serif;
+    color: #000;
+    text-shadow: 0 0 3px #fff, 0 0 3px #fff;
+    pointer-events: none;
+  }
+
+  /* hidden mouse cursor (fullscreen, after the mouse stops moving) */
+  body.idle, body.idle * { cursor: none; }
+
+  /* timestamp */
+  #tip {
+    position: fixed;
+    bottom: calc(36px + env(safe-area-inset-bottom, 0px));
+    left: 0;
+    padding: 3px 8px;
+    background: #000;
+    color: #fff;
+    font: 14px/1.2 Georgia, "Times New Roman", serif;
+    white-space: nowrap;
+    display: none;
+    pointer-events: none;
+    z-index: 6;
+  }
+</style>
+</head>
+<body>
+
+<div id="stage"></div>
+
+<div id="bar">
+  <div id="fill"></div>
+  <div id="cap">[</div>
+</div>
+<div id="tip">0:00</div>
+
+<!-- The list of page images, created by the Terminal command -->
+<script src="pages.js"></script>
+
+<script>
+/* ---------- settings ---------- */
+const AUDIO_SRC   = "audio.mp3"; // put your audio file next to this file; change the name here. Use "" for no audio.
+const PAGE_SECONDS = 1;          // how long each page stays
+const FIT          = "contain";  // "contain" = whole page visible, "cover" = zoom to fill and crop edges
+const BACKGROUND   = "#fff";     // color behind the pages (matters for "contain")
+const POSITION     = "left top"; // where the page sits on screen: "left top", "center", ...
+const TOP_SPACE    = "40px";     // empty space above the page, e.g. "0px", "20px", "5vh"
+const LOOP_AUDIO   = false;      // true = audio repeats, false = plays once
+const CURSOR_HIDE_SECONDS = 2;   // in fullscreen, hide the mouse this long after it stops moving
+
+/* ---------- setup ---------- */
+const stage = document.getElementById("stage");
+const bar   = document.getElementById("bar");
+const fill  = document.getElementById("fill");
+const cap   = document.getElementById("cap");
+const tip   = document.getElementById("tip");
+
+document.documentElement.style.background = BACKGROUND;
+document.body.style.background = BACKGROUND;
+stage.style.background = BACKGROUND;
+stage.style.top = TOP_SPACE;
+stage.style.height = "calc(100dvh - " + TOP_SPACE + ")";
+
+const imgs = PAGES.map((src, i) => {
+  const im = new Image();
+  im.src = src;
+  im.alt = "";
+  im.decoding = "async";
+  im.draggable = false;
+  im.style.objectFit = FIT;
+  im.style.objectPosition = POSITION;
+  stage.appendChild(im);
+  return im;
+});
+
+let current = Math.floor(Math.random() * imgs.length);
+imgs[current].classList.add("on");
+
+function show(i) {
+  imgs[current].classList.remove("on");
+  current = i;
+  imgs[current].classList.add("on");
+}
+
+const audio = AUDIO_SRC ? new Audio(AUDIO_SRC) : null;
+if (audio) {
+  audio.preload = "metadata";
+  audio.loop = LOOP_AUDIO;
+}
+
+/* ---------- start on first click / tap ---------- */
+let started = false;
+function start() {
+  if (started) return;
+  started = true;
+  // hide the browser's address bar and tabs (works on desktop and Android; iPhone see note)
+  const el = document.documentElement;
+  const goFull = el.requestFullscreen || el.webkitRequestFullscreen;
+  if (goFull) { try { Promise.resolve(goFull.call(el)).catch(() => {}); } catch (e) {} }
+  if (audio) audio.play().catch(() => {});
+  setInterval(() => show((current + 1) % imgs.length), PAGE_SECONDS * 1000);
+  requestAnimationFrame(tick);
+}
+document.addEventListener("click", start);
+
+/* ---------- hide the mouse in fullscreen ---------- */
+let idleTimer;
+function isFull() { return !!(document.fullscreenElement || document.webkitFullscreenElement); }
+function wake() {
+  document.body.classList.remove("idle");
+  clearTimeout(idleTimer);
+  if (isFull()) {
+    idleTimer = setTimeout(() => document.body.classList.add("idle"), CURSOR_HIDE_SECONDS * 1000);
+  }
+}
+document.addEventListener("mousemove", wake);
+document.addEventListener("fullscreenchange", wake);
+document.addEventListener("webkitfullscreenchange", wake);
+
+/* ---------- progress bar ---------- */
+function tick() {
+  if (audio && audio.duration) {
+    const frac = Math.min(audio.currentTime / audio.duration, 1);
+    const w = bar.clientWidth * frac;
+    fill.style.width = w + "px";
+    cap.style.transform = "translateX(" + w + "px)";
+  }
+  requestAnimationFrame(tick);
+}
+// show the "[" at the very start before anything plays
+cap.style.transform = "translateX(0px)";
+
+/* ---------- timestamp on hover / touch ---------- */
+function fmt(s) {
+  s = Math.max(0, Math.floor(s));
+  return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+}
+function showTip(e) {
+  if (!audio || !audio.duration) return;
+  const r = bar.getBoundingClientRect();
+  const x = Math.min(Math.max(e.clientX - r.left, 0), r.width);
+  tip.textContent = fmt((x / r.width) * audio.duration);
+  tip.style.display = "block";
+  const tw = tip.offsetWidth;
+  tip.style.left = Math.min(Math.max(x - tw / 2, 4), window.innerWidth - tw - 4) + "px";
+}
+function hideTip() { tip.style.display = "none"; }
+
+/* ---------- scrubbing (audio only, slideshow keeps running) ---------- */
+let dragging = false;
+function seek(e) {
+  if (!audio || !audio.duration) return;
+  const r = bar.getBoundingClientRect();
+  const x = Math.min(Math.max(e.clientX - r.left, 0), r.width);
+  audio.currentTime = (x / r.width) * audio.duration;
+  // if the audio had already ended, scrubbing brings it back to life
+  if (started && audio.paused) audio.play().catch(() => {});
+}
+
+bar.addEventListener("pointerenter", showTip);
+bar.addEventListener("pointerdown", e => {
+  dragging = true;
+  bar.setPointerCapture(e.pointerId);
+  showTip(e);
+  seek(e);
+});
+bar.addEventListener("pointermove", e => {
+  showTip(e);
+  if (dragging) seek(e);
+});
+function endDrag() { dragging = false; hideTip(); }
+bar.addEventListener("pointerup", endDrag);
+bar.addEventListener("pointercancel", endDrag);
+bar.addEventListener("pointerleave", () => { if (!dragging) hideTip(); });
+</script>
+</body>
+</html>
